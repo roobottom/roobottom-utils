@@ -10,24 +10,36 @@ const imagekit = new ImageKit({
   urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT
 });
 
-const uploadLogPath = 'log.txt'; // Set the path for your upload log
+const uploadLogPath = 'log.txt'; // Ensure this path is correct and accessible
+const allowedExtensions = ['.jpg', '.png', '.jpeg'];
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function logUploadedFile(fileName) {
-  fs.appendFileSync(uploadLogPath, fileName + '\n');
+// Modified to log the relative file path
+function logUploadedFile(relativeFilePath) {
+  fs.appendFileSync(uploadLogPath, relativeFilePath + '\n');
 }
 
-function hasBeenUploaded(fileName) {
+// Log errors in a file
+function logUploadError(relativeFilePath, error) {
+  const errorMessage = `${new Date().toISOString()} - Error uploading ${relativeFilePath}: ${error}\n`;
+  fs.appendFileSync('errors.txt', errorMessage);
+}
+
+
+// Updated to check for the relative file path
+function hasBeenUploaded(relativeFilePath) {
   const uploadedFiles = fs.readFileSync(uploadLogPath, 'utf8');
-  return uploadedFiles.includes(fileName);
+  return uploadedFiles.includes(relativeFilePath);
 }
 
 async function uploadFile(filePath, imagekitFolderPath, fileName, retries = 3) {
-  if (hasBeenUploaded(fileName)) {
-    console.log('Skipping already uploaded file:', fileName);
+  const relativeFilePath = path.join(imagekitFolderPath, fileName); // Construct the relative file path
+
+  if (hasBeenUploaded(relativeFilePath)) {
+    console.log('Skipping already uploaded file:', relativeFilePath);
     return;
   }
 
@@ -39,14 +51,18 @@ async function uploadFile(filePath, imagekitFolderPath, fileName, retries = 3) {
       folder: imagekitFolderPath,
       useUniqueFileName: false
     });
-    console.log('Uploaded:', fileName);
-    logUploadedFile(fileName);
+    console.log('Uploaded:', relativeFilePath);
+    logUploadedFile(relativeFilePath); // Log the relative file path
   } catch (error) {
-    console.error('Upload error:', fileName, '; Error:', error.message);
+    console.error('Upload error:', relativeFilePath, '; Error:', error.message);
     if (retries > 0) {
       console.log(`Retrying... Attempts left: ${retries}`);
       await delay(1000); // Delay of 1 second between retries
       await uploadFile(filePath, imagekitFolderPath, fileName, retries - 1);
+    }
+    else {
+      console.error('Upload error after all retries:', relativeFilePath, '; Error:', error.message);
+      logUploadError(relativeFilePath, error.message);
     }
   }
 }
@@ -60,14 +76,18 @@ function uploadDirectory(directoryPath, imagekitFolderPath) {
 
     for (const file of files) {
       const filePath = path.join(directoryPath, file.name);
+      const fileExtension = path.extname(file.name).toLowerCase();
 
       if (file.isDirectory()) {
-        uploadDirectory(filePath, imagekitFolderPath + '/' + file.name);
-      } else {
+        uploadDirectory(filePath, path.join(imagekitFolderPath, file.name));
+      } else if (allowedExtensions.includes(fileExtension)) {
         await uploadFile(filePath, imagekitFolderPath, file.name);
+      } else {
+        console.log('Skipping file due to unsupported extension:', file.name);
       }
     }
   });
 }
 
-uploadDirectory('../../roobottom-2022/source/assets/images/diary/', '/assets/images/diary');
+// Adjust the paths as needed
+uploadDirectory('../../roobottom-2022/source/assets/images/diary/', 'assets/images/diary');
